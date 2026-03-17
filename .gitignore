@@ -1,0 +1,6 @@
+# Google Drive
+*.gdoc
+*.gsheet
+*.gslides
+.~lock.*
+Icon?
