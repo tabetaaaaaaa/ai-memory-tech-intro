@@ -419,4 +419,94 @@ Ring Attentionは、巨大な計算を「輪（リング）」状に並んだ複
 * 1枚のGPUのメモリが1GBしかなくても、1,000枚つなげば1,000GB分の文章が扱える。
 * **「1枚の限界 ＝ 全体の限界」という呪縛が解けた**ため、理論上はデバイスを増やし続ける限り、コンテキスト（記憶容量）をどこまでも伸ばせるようになったのです。
 
+## 2026/03/19
 
+> **質問:** 教科書（生成AIメモリ技術入門）の3.2.1に記載されているsoftmax正規化の数学的特性について、詳しく教えてください
+
+### Softmax正規化の数学的特性と「ゼロサムの注意配分」
+
+#### 1. Softmax関数とは何か（前提知識）
+
+Self-Attentionでは、あるトークン（Query）が他のすべてのトークン（Key）とどれだけ「関連しているか」を数値化します。この生のスコア（logit）を、**確率分布に変換する**のがSoftmax関数です。
+
+$$\alpha_{ij} = \text{softmax}(s_{ij}) = \frac{\exp(s_{ij})}{\sum_{l=1}^{N} \exp(s_{il})}$$
+
+- $s_{ij}$：QueryトークンiとKeyトークンjの類似度スコア（内積）
+- $N$：入力系列の全トークン数
+- $\alpha_{ij}$：トークンiがトークンjに割り当てる**Attention重み**
+
+#### 2. 「合計が必ず1になる」という制約
+
+Softmax関数の最も重要な数学的特性は、出力が以下の2条件を**常に満たす**ことです。
+
+| 条件 | 数式 | 意味 |
+|:--|:--|:--|
+| **非負性** | $\alpha_{ij} \geq 0$ | 注意の重みは負にならない |
+| **正規化** | $\sum_{j=1}^{N} \alpha_{ij} = 1$ | あるQueryから見た全Keyへの重みの合計は必ず1 |
+
+つまり、Attention重みは**確率分布**として振る舞います。これは「注意という資源の総量が1に固定されている」ことを意味します。
+
+#### 3. なぜこれが「ゼロサム」になるのか
+
+教科書が「ゼロサムの構造」と呼んでいるのは、以下のメカニズムです。
+
+**トークン数が少ない場合（N=3）:**
+
+| Key | スコア | Attention重み |
+|:--|:--|:--|
+| A（関連あり） | 5.0 | **0.88** |
+| B | 1.0 | 0.06 |
+| C | 1.0 | 0.06 |
+
+→ 関連トークンAに注意の88%が集中。
+
+**無関係なトークンを7個追加した場合（N=10）:**
+
+分母の $\sum \exp(s_{il})$ に7個分の $\exp$ 値が加算されるため、**分母が大きくなり**、すべての $\alpha_{ij}$ が縮小します。
+
+| Key | スコア | Attention重み |
+|:--|:--|:--|
+| A（関連あり） | 5.0 | **0.65** （↓23ポイント低下） |
+| B〜J（無関係） | 各1.0 | 各0.039 |
+
+これが教科書の記述する「**トークンが追加されるたびに、既存のすべてのトークンに割り当てられるAttentionの総量が減少する**」という現象の数学的実態です。パイ（=1.0）の大きさは変わらないのに、分け合う人数だけが増えていくイメージです。
+
+#### 4. Attention Sinks（注意の掃き溜め）
+
+ここからが教科書の核心部分です。
+
+Softmaxは**「どこにも注意を向けない」という選択肢を許さない**関数です。MITの研究チームはこれを「**棄権が許されない民主主義投票（deafening democracy where abstention is disallowed）**」と表現しています。
+
+すべての重みが非負かつ合計1であるため、仮にあるAttentionヘッドが「このクエリに対して本当に関連するトークンはない」と判断したくても、**どこかに注意を配分しなければなりません**。
+
+この「行き場のない注意」が投棄される先が、入力の**先頭トークン**（BOS記号、システムプロンプトの冒頭、区切り文字など）です。これが**Attention Sinks**と呼ばれる現象です。
+
+```text
+[先頭トークン] ← 余剰Attentionが集中（Sink）
+[トークン2]
+[トークン3]    ← 本来注目すべき情報
+...
+[トークンN]
+```
+
+ICLR 2025で発表された研究によれば、Attention Sinksは深いモデルにおいて**表現の崩壊（representational collapse）を防ぐ安全弁**としても機能しており、単なるバグではなくSoftmaxベースのAttentionに内在する構造的な性質であることが明らかになっています。
+
+#### 5. まとめ：Context Dilutionへの接続
+
+| 特性 | 内容 |
+|:--|:--|
+| **合計1の制約** | 注意の総量は固定。トークンが増えれば1人あたりの取り分が減る |
+| **非負性の制約** | 「注意を向けない」という選択ができない |
+| **結果** | 無関係な情報を追加するほど、関連情報へのAttentionが**単調に減少**する |
+
+この数学的特性こそが、教科書3.2.2以降で解説される「正解が見えているのに答えられない」現象（Context Dilution）の根本原因です。RAGの設計において「関連度の低い文書をプロンプトに混入させない」ことが極めて重要である理由は、このSoftmaxの数学的制約に直結しています。
+
+---
+
+Sources:
+- [The Softmax Function for Attention Weights](https://apxml.com/courses/foundations-transformers-architecture/chapter-2-attention-mechanism-core-concepts/softmax-attention-weights)
+- [How Attention Sinks Keep Language Models Stable - MIT Han Lab](https://hanlab.mit.edu/blog/streamingllm)
+- [When Attention Sink Emerges (ICLR 2025)](https://proceedings.iclr.cc/paper_files/paper/2025/file/f1b04face60081b689ba740d39ea8f37-Paper-Conference.pdf)
+- [Attention Scoring Functions — Dive into Deep Learning](https://d2l.ai/chapter_attention-mechanisms-and-transformers/attention-scoring-functions.html)
+- [Scalable-Softmax Is Superior for Attention](https://arxiv.org/html/2501.19399v1)
+- [Softpick: No Attention Sink, No Massive Activations with Rectified Softmax](https://arxiv.org/html/2504.20966v1)
