@@ -1,7 +1,14 @@
 # 生成AIメモリ技術入門
 
+## リポジトリ目的
+
 生成AI（LLM）におけるメモリ技術を体系的に学習するためのリポジトリ。
-コンテキストウィンドウの進化から、RAG/GraphRAG、Agentic Memory、自己内省（Reflection）まで、基礎から最新技術までを網羅する。
+コンテキストウィンドウの進化から、RAG/GraphRAG、Agentic Memory、自己内省（Reflection）まで。
+基礎から最新技術までを網羅する。
+
+## 主要ファイル
+
+[summary.md](/docs/summary.md)：学習内容を体系的にまとめたもの
 
 ### 各ディレクトリの説明
 
